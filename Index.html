@@ -1,0 +1,390 @@
+<!doctype html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    body{font-family:Arial;background:#eef3f7;margin:0}
+    .wrap{max-width:1400px;margin:18px auto;padding:0 16px}
+    .card{background:#fff;padding:14px;border-radius:14px;box-shadow:0 10px 25px rgba(0,0,0,.08);margin-bottom:12px}
+    .top{display:flex;align-items:center;justify-content:space-between;gap:12px}
+    h2{margin:6px 0 10px 0}
+    .filters{display:flex;gap:10px;flex-wrap:wrap;align-items:end}
+    label{font-size:12px;color:#556;margin-bottom:4px;display:block}
+    select,button,input{padding:10px;border-radius:10px;border:1px solid #ccd}
+    button{background:#2E86AB;color:#fff;border:none;font-weight:700;cursor:pointer}
+    button:disabled{opacity:.6;cursor:not-allowed}
+
+    .tableWrap{overflow:auto;border:1px solid #dde;border-radius:12px}
+    table{border-collapse:separate;border-spacing:0;min-width:1100px;width:max-content}
+    th,td{border-right:1px solid #e6e6e6;border-bottom:1px solid #e6e6e6;padding:8px 10px;white-space:nowrap;vertical-align:top;font-size:13px}
+    th{position:sticky;top:0;background:#dfefff;z-index:5}
+    .stickyLeft{position:sticky;left:0;z-index:6;background:#f7fbff}
+    .headLeft{background:#2E86AB;color:#fff}
+    .cell{border-radius:8px;padding:6px 8px;line-height:1.2; cursor:pointer}
+    .svc{font-weight:700}
+    .hr{font-size:12px;opacity:.85;margin-top:2px}
+    .ferRow td,.ferRow .stickyLeft{background:#fff7e6}
+    .totRow td,.totRow .stickyLeft{background:#f0fbff;font-weight:700}
+    .small{font-size:12px;color:#667}
+
+    .tooltip{
+      position:fixed; pointer-events:none; background:#111; color:#fff;
+      padding:8px 10px; border-radius:10px; font-size:12px; opacity:0;
+      transform:translate(12px,12px); transition:opacity .08s;
+      max-width:280px;
+      white-space:pre-line;
+    }
+
+    /* Modal */
+    #modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:99}
+    .modalBox{background:#fff;max-width:440px;margin:8% auto;padding:16px;border-radius:14px}
+    .row2{display:flex;gap:10px;margin-top:10px}
+    .row2 > div{flex:1}
+    .btnRow{margin-top:14px;display:flex;gap:10px;justify-content:flex-end}
+    .btnCancel{background:#999}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card top">
+      <div>
+        <h2>Diagrama Mensual de Conductores</h2>
+        <div class="small" id="status">Listo</div>
+      </div>
+      <div class="small">Usuario Admin ▾</div>
+    </div>
+
+    <div class="card">
+      <div class="filters">
+        <div>
+          <label>Diagrama</label>
+          <select id="selDiagrama"></select>
+        </div>
+        <div>
+          <label>Mes</label>
+          <select id="selMes">
+            <option value="1">Enero</option><option value="2">Febrero</option><option value="3">Marzo</option>
+            <option value="4">Abril</option><option value="5">Mayo</option><option value="6">Junio</option>
+            <option value="7">Julio</option><option value="8">Agosto</option><option value="9">Septiembre</option>
+            <option value="10">Octubre</option><option value="11">Noviembre</option><option value="12">Diciembre</option>
+          </select>
+        </div>
+        <div>
+          <label>Año</label>
+          <select id="selAnio"></select>
+        </div>
+        <button id="btnFiltrar">Filtrar</button>
+        <button id="btnImprimir" style="margin-left:auto">Imprimir</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="tableWrap" id="gridWrap"></div>
+    </div>
+  </div>
+
+  <div class="tooltip" id="tip"></div>
+
+  <!-- MODAL EDICION -->
+  <div id="modal">
+    <div class="modalBox">
+      <h3 style="margin:0 0 10px 0">Editar asignación</h3>
+
+      <div>
+        <label>Servicio</label>
+        <select id="mServicio"></select>
+      </div>
+
+      <div class="row2">
+        <div>
+          <label>Hora inicio (opcional)</label>
+          <input id="mIni" placeholder="08:05">
+        </div>
+        <div>
+          <label>Hora fin (opcional)</label>
+          <input id="mFin" placeholder="17:05">
+        </div>
+      </div>
+
+      <div class="btnRow">
+        <button class="btnCancel" id="btnCancel">Cancelar</button>
+        <button id="btnSave">Guardar</button>
+      </div>
+
+      <div class="small" id="modalMsg" style="margin-top:10px"></div>
+    </div>
+  </div>
+
+<script>
+const $ = (id)=>document.getElementById(id);
+
+let LAST_GRID = null;
+let SERVICIOS_CACHE = [];
+let MODAL_CTX = null;
+
+function setStatus(msg){ $("status").textContent = msg; }
+
+function boot(){
+  const y = new Date().getFullYear();
+  for(let i=y-2;i<=y+2;i++){
+    const opt=document.createElement("option");
+    opt.value=i; opt.textContent=i;
+    if(i===y) opt.selected=true;
+    $("selAnio").appendChild(opt);
+  }
+  $("selMes").value = (new Date().getMonth()+1);
+
+  setStatus("Cargando diagramas…");
+  google.script.run
+    .withSuccessHandler(({diagramas})=>{
+      $("selDiagrama").innerHTML="";
+      diagramas.forEach(d=>{
+        const opt=document.createElement("option");
+        opt.value=d.IdDiagrama;
+        opt.textContent=`${d.IdDiagrama} - ${d.Nombre}`;
+        $("selDiagrama").appendChild(opt);
+      });
+      setStatus("Listo");
+      loadGrid();
+    })
+    .withFailureHandler(err=> setStatus("Error: "+(err && err.message ? err.message : err)))
+    .api_bootstrap();
+}
+
+function loadGrid(){
+  const idDiagrama = $("selDiagrama").value;
+  const month = $("selMes").value;
+  const year = $("selAnio").value;
+
+  $("btnFiltrar").disabled = true;
+  setStatus("Cargando diagrama…");
+
+  google.script.run
+    .withSuccessHandler((data)=>{
+      LAST_GRID = data;
+      renderGrid(data);
+      $("btnFiltrar").disabled=false;
+      setStatus("Listo");
+    })
+    .withFailureHandler(err=>{
+      setStatus("Error: "+(err && err.message ? err.message : err));
+      $("btnFiltrar").disabled=false;
+    })
+    .api_getDiagramaMensual({idDiagrama, year, month});
+}
+
+function renderGrid(data){
+  const {conductores, days, totals} = data;
+
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const trh = document.createElement("tr");
+
+  const th0 = document.createElement("th");
+  th0.className = "stickyLeft headLeft";
+  th0.innerHTML = "PERSONAL-<br>DÍA";
+  trh.appendChild(th0);
+
+  conductores.forEach(c=>{
+    const th=document.createElement("th");
+    th.innerHTML = `${escapeHtml(c.legajo)}<br><span class="small" style="font-weight:700">${escapeHtml(c.nombre)}</span>`;
+    trh.appendChild(th);
+  });
+
+  thead.appendChild(trh);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  days.forEach((d)=>{
+    const tr=document.createElement("tr");
+    if(d.feriado) tr.classList.add("ferRow");
+
+    const tdL=document.createElement("td");
+    tdL.className="stickyLeft";
+    tdL.innerHTML = `<b>${d.day}</b><div class="small">${escapeHtml(d.dow)}</div>`;
+    tr.appendChild(tdL);
+
+    conductores.forEach(c=>{
+      const info = d.cells[c.legajo];
+      const td=document.createElement("td");
+
+      const box=document.createElement("div");
+      box.className="cell";
+      if(info.color) box.style.background = info.color;
+
+      box.innerHTML = `<div class="svc">${escapeHtml(info.servicio || "")}</div>
+                       <div class="hr">${escapeHtml(info.hora || "")}</div>`;
+
+      box.dataset.tip = [
+        `Día: ${d.day} (${d.dow})`,
+        `Conductor: ${c.nombre} (${c.legajo})`,
+        `Servicio: ${info.servicio || "-"}`,
+        `Horario: ${info.hora || "-"}`,
+        `Horas: ${(info.hours||0).toFixed(2)}`,
+        d.feriado ? "FERIADO: suma aparte" : "Normal"
+      ].join("\n");
+
+      box.addEventListener("click", ()=>{
+        openModal({
+          idDiagrama: data.idDiagrama,
+          fechaKey: d.dateKey,
+          legajo: c.legajo,
+          servicio: info.servicio || "",
+          horaIni: (info.hora || "").split(" - ")[0] || "",
+          horaFin: (info.hora || "").split(" - ")[1] || ""
+        });
+      });
+
+      td.appendChild(box);
+      tr.appendChild(td);
+    });
+
+    tbody.appendChild(tr);
+  });
+
+  // Totales (3 filas)
+  tbody.appendChild(makeTotalsRow("TotalHoras", conductores, totals, "totalHoras"));
+  tbody.appendChild(makeTotalsRow("TotalHorasFeriado", conductores, totals, "totalFeriado"));
+  tbody.appendChild(makeTotalsRow("TotalHorasTotal", conductores, totals, "totalGeneral"));
+
+  table.appendChild(tbody);
+
+  $("gridWrap").innerHTML="";
+  $("gridWrap").appendChild(table);
+}
+
+function makeTotalsRow(label, conductores, totals, field){
+  const tr=document.createElement("tr");
+  tr.className="totRow";
+
+  const tdL=document.createElement("td");
+  tdL.className="stickyLeft";
+  tdL.textContent = label;
+  tr.appendChild(tdL);
+
+  conductores.forEach(c=>{
+    const td=document.createElement("td");
+    const v = totals[c.legajo]?.[field] ?? 0;
+    td.textContent = Number(v).toFixed(1);
+    tr.appendChild(td);
+  });
+  return tr;
+}
+
+function escapeHtml(s){
+  s = (s ?? "").toString();
+  return s.replace(/[&<>"']/g, m => ({
+    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"
+  }[m]));
+}
+
+/******** Tooltip ********/
+const tip = $("tip");
+window.addEventListener("mousemove",(e)=>{
+  if(tip.style.opacity==="1"){
+    tip.style.left = e.clientX+"px";
+    tip.style.top  = e.clientY+"px";
+  }
+});
+document.addEventListener("mouseover",(e)=>{
+  const box = e.target.closest?.(".cell");
+  if(!box) return;
+  tip.textContent = box.dataset.tip || "";
+  tip.style.opacity = "1";
+});
+document.addEventListener("mouseout",(e)=>{
+  const box = e.target.closest?.(".cell");
+  if(!box) return;
+  tip.style.opacity = "0";
+});
+
+/******** Modal ********/
+function openModal(ctx){
+  MODAL_CTX = ctx;
+  $("modalMsg").textContent = "";
+  $("modal").style.display = "block";
+
+  if(!SERVICIOS_CACHE.length){
+    google.script.run
+      .withSuccessHandler((s)=>{
+        SERVICIOS_CACHE = s || [];
+        fillServicios();
+      })
+      .withFailureHandler(err=>{
+        $("modalMsg").textContent = "Error servicios: " + (err && err.message ? err.message : err);
+      })
+      .api_getServicios();
+  }else{
+    fillServicios();
+  }
+}
+
+function fillServicios(){
+  const sel = $("mServicio");
+  sel.innerHTML = "<option value=''>-- vacío --</option>";
+  SERVICIOS_CACHE.forEach(s=>{
+    const o=document.createElement("option");
+    o.value=s.servicio;
+    o.textContent=s.servicio;
+    sel.appendChild(o);
+  });
+
+  sel.value = MODAL_CTX.servicio || "";
+  $("mIni").value = MODAL_CTX.horaIni || "";
+  $("mFin").value = MODAL_CTX.horaFin || "";
+}
+
+function closeModal(){
+  $("modal").style.display = "none";
+  MODAL_CTX = null;
+}
+
+function saveModal(){
+  if(!MODAL_CTX) return;
+
+  const idDiagrama = MODAL_CTX.idDiagrama || $("selDiagrama").value;
+  const fecha = MODAL_CTX.fechaKey; // YYYY-MM-DD
+  const legajo = MODAL_CTX.legajo;
+
+  const data = {
+    IdDiagrama: idDiagrama,
+    Fecha: fecha,
+    Legajo: legajo,
+    Servicio: $("mServicio").value,
+    HoraInicio: $("mIni").value,
+    HoraFin: $("mFin").value
+  };
+
+  $("btnSave").disabled = true;
+  $("modalMsg").textContent = "Guardando…";
+
+  google.script.run
+    .withSuccessHandler(()=>{
+      $("modalMsg").textContent = "Guardado ✅";
+      $("btnSave").disabled = false;
+      closeModal();
+      loadGrid();
+    })
+    .withFailureHandler(err=>{
+      $("modalMsg").textContent = "Error: " + (err && err.message ? err.message : err);
+      $("btnSave").disabled = false;
+    })
+    .api_saveAsignacion(data);
+}
+
+// Cerrar modal por click afuera
+$("modal").addEventListener("click",(e)=>{
+  if(e.target.id==="modal") closeModal();
+});
+$("btnCancel").addEventListener("click", closeModal);
+$("btnSave").addEventListener("click", saveModal);
+
+/******** Botones ********/
+$("btnFiltrar").addEventListener("click", loadGrid);
+$("btnImprimir").addEventListener("click", ()=>window.print());
+
+boot();
+</script>
+</body>
+</html>
